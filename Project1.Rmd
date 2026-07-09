@@ -1,0 +1,333 @@
+---
+title: "Claim Severity Modeling"
+author: "Ciwon Kang"
+date: "2026-06-30"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    code_folding: hide
+    theme: cosmo
+    css: style.css
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+
+
+
+
+
+
+## ***1) Overview***
+This project models **claim severity** (PAID amount) using the AutoClaims dataset.  
+We compare three modeling approaches:<br>
+- 1. Linear Regression<br>
+- 2. Log-transformed Linear Regression<br>
+- 3. Gamma GLM<br>
+
+The goal is to identify an appropriate model for predicting insurance claim amounts.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## ***2) Data Exploration***
+```{r}
+library(insuranceData)
+data(AutoClaims)
+```
+
+```{r, results='hide'}
+head(AutoClaims)
+str(AutoClaims)
+summary(AutoClaims)
+```
+
+**Variables:**
+
+- `STATE`: Region of the policyholder
+- `CLASS`: Rating class based on demographic and vehicle usage factors
+- `GENDER`: Gender of the operator
+- `AGE`: Age of the operator
+- `PAID`: Claim amount (Response variable)
+
+
+```{r}
+hist(AutoClaims$PAID, breaks=50,
+     main="Distribution of PAID",
+     xlab="PAID",
+     ylab="Frequency",
+     freq=TRUE)
+```
+
+```{r}
+library(moments)
+skewness(AutoClaims$PAID)
+```
+
+**Observation:**<br>
+- PAID represents claim severity and is used as the response variable.
+Other variables represent policyholder characteristics and risk factors. <br><br>
+- The claim severity distribution is highly right-skewed with a skewness value of 6.24. 
+Most claims are relatively small, while a small number of large claims create a long right tail.
+The highly skewed distribution of claim severity often leads to non-constant variance and makes standard linear regression less suitable for insurance severity modeling.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## ***3) Model 1 : Linear Regression (OLS)***
+### **3.1 Model fitting**
+```{r}
+model1<-lm(PAID~., data=AutoClaims)
+summary(model1)
+```
+**Observation:**<br>
+OLS is first used as a baseline model to evaluate how a standard linear regression performs on insurance claim severity data.
+
+### **3.2 Multicollinearity Check**
+```{r, message=FALSE}
+library(car)
+```
+```{r}
+vif(model1)
+```
+**Observation:**<br>
+VIF values are examined to ensure predictors are not highly correlated with each other, which could make coefficient estimates unstable.<br>
+
+### **3.3 Actual vs Predicted claims**
+```{r}
+plot(predict(model1),AutoClaims$PAID,
+     main="Model 1: OLS",
+     xlab="Predicted",
+     ylab="Actual",
+     pch=16,
+     )
+abline(a=0,b=1,col="red",lwd=2)
+```
+**Observation:**<br>
+Predictions are concentrated around a limited range and fail to capture the large variation observed in actual claim amounts, suggesting that OLS has difficulty modeling extreme claim values.
+<br><br>
+
+### **3.4 Limitations**
+
+
+
+#### **3.4.1 Distribution Assumption**
+- Claim severity is highly right-skewed, while OLS performs best when errors are approximately symmetric with constant variance.
+<br><br>
+
+#### **3.4.2 Negative Predictions**
+```{r}
+min(predict(model1))
+```
+- Although no negative predictions occur in this dataset, OLS does not impose a positivity constraint and could theoretically generate invalid negative claim amounts.
+<br><br>
+
+#### **3.4.3 Heteroskedasticity**
+```{r}
+plot(model1$fitted.values,
+     residuals(model1),
+     main="Residuals vs Fitted Values",
+     xlab="Fitted Values",
+     ylab="Residuals",
+     pch=16)
+
+abline(h=0, col="red", lwd=2)
+```
+
+- Residual variability increases as predicted claim amounts increase, indicating possible heteroskedasticity commonly observed in insurance severity data.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## ***4) Model 2: Log-transformed Linear Regression***
+### **4.1 Log transformation**
+```{r}
+par(mfrow=c(1,2))
+
+hist(AutoClaims$PAID, breaks=50,
+     main="Distribution of PAID",
+     xlab="PAID",
+     ylab="Frequency"
+     )
+
+hist(log(AutoClaims$PAID), breaks=50,
+     main="Distribution of Log(PAID)",
+     xlab="Log(PAID)",
+     ylab="Frequency"
+     )
+```
+**Observation:**<br>
+Log transformation reduces the impact of extreme claims and creates a distribution that is closer to symmetry.
+
+
+
+
+### **4.2 Skewness comparison**
+```{r}
+skewness(AutoClaims$PAID)
+skewness(log(AutoClaims$PAID))
+```
+**Observation:**<br>
+Skewness decreases significantly after log transformation, indicating improved distributional properties compared to the original claim amounts.
+
+
+
+### **4.3 Model fitting**
+```{r}
+model2<-lm(log(PAID)~., data=AutoClaims)
+summary(model2)
+```
+**Observation:**<br>
+The model is fitted on the logarithm of claim severity rather than the original claim amount. This reduces the influence of extreme claims and better reflects the underlying distribution of insurance losses.
+
+
+
+
+
+
+### **4.4 Improvements**
+
+#### **4.4.1 Reduced skewness**
+- The distribution of claim severity becomes much closer to symmetric, improving the suitability of linear regression.
+
+#### **4.4.2 Positive prediction**
+- Exponentiating the fitted values ensures that all back-transformed predictions remain strictly positive.
+
+#### **4.4.3 Reduced heteroskedasticity**
+- Log transformation compresses large claim amounts, leading to a more stable residual variance across fitted values.
+
+
+### **4.5 Limitations**
+```{r}
+logYpredicted<-exp(predict(model2))
+
+mean(AutoClaims$PAID)
+mean(logYpredicted)
+```
+- Although the log-transformed model improves prediction on the logarithmic scale, exponentiating predictions back to the original claim scale does not recover the true conditional mean. Because the multiplicative effect of \(E(e^\varepsilon)\) is omitted, the back-transformed predictions systematically underestimate the expected claim severity; **Retransformation bias**. This limitation motivates the use of Gamma GLM, which models the conditional mean directly on the original scale.
+
+
+
+
+
+
+
+
+
+
+
+
+
+## ***5) Model 3 : Gamma GLM***
+### **5.1 Why Gamma GLM?**
+- Although the log-transformed linear regression improves several limitations of OLS, it introduces retransformation bias when predictions are converted back to the original claim scale. Gamma GLM addresses this issue by modeling the conditional mean of positive claim amounts directly on the original scale while naturally accommodating the right-skewed distribution of insurance claim severity.
+
+### **5.2 Model fitting**
+
+```{r}
+model3 <- glm(PAID ~ .,data = AutoClaims,family = Gamma(link = "log"))
+
+summary(model3)
+```
+**Observation:**<br>
+Gamma GLM models the expected claim severity directly on the original scale using a log link. Unlike the log-transformed linear model, no back-transformation is required when making predictions.
+
+### **5.3 Improvements**
+
+#### **5.3.1 Appropriate distribution**
+- Gamma GLM assumes a Gamma distribution for the response variable, which is appropriate for positive, continuous, and right-skewed claim severity data. This addresses the distributional limitation observed in the OLS model without transforming the response variable.
+
+#### **5.3.2 Positive predictions**
+- Gamma GLM uses a log link, ensuring that all predicted claim amounts remain strictly positive. Although OLS did not produce negative predictions in this dataset, Gamma GLM guarantees positive predictions by model construction.
+
+#### **5.3.3 Appropriate mean-variance relationship**
+- Gamma GLM allows the variance to increase with the expected claim amount, making it more appropriate for insurance claim severity data where larger claims tend to exhibit greater variability.
+
+#### **5.3.4 No retransformation bias**
+```{r}
+Gammapredicted <- predict(model3, type = "response")
+
+data.frame(
+  Model=c("Actual",
+          "Log LM",
+          "Gamma GLM"),
+  Mean=c(
+    mean(AutoClaims$PAID),
+    mean(logYpredicted),
+    mean(Gammapredicted)
+  )
+)
+```
+
+**Observation:**<br>
+The log-transformed linear regression underestimates the mean claim amount after back-transformation because of retransformation bias. Gamma GLM predicts directly on the original claim scale and therefore avoids this issue.
+
+## ***6) Model Comparison***
+
+```{r}
+library(knitr)
+
+model_summary <- data.frame(
+  Property = c(
+    "Appropriate for right-skewed severity data",
+    "Guaranteed positive predictions",
+    "Addresses heteroskedasticity",
+    "Avoids retransformation bias"
+  ),
+  OLS = c("No", "Not guaranteed", "No", "N/A"),
+  `Log LM` = c("Yes", "Yes", "Partially", "No"),
+  `Gamma GLM` = c("Yes", "Yes", "Yes", "Yes")
+)
+
+kable(model_summary,
+      align = "lccc",
+      caption = "Summary of Model Characteristics")
+```
+- The summary table shows that Gamma GLM addresses the main limitations identified in OLS while also avoiding the retransformation bias introduced by the log-transformed linear model.
+
+## ***7) Conclusion***
+Among the three models, Gamma GLM provides the most appropriate framework for modeling insurance claim severity. OLS is useful as a baseline model, but it does not naturally account for the positive, right-skewed, and heteroskedastic nature of claim amounts. The log-transformed linear model improves several limitations of OLS, but it introduces retransformation bias when predictions are converted back to the original claim scale. Gamma GLM addresses these issues by modeling expected claim severity directly on the original scale while allowing positive predictions and a more appropriate mean-variance relationship. Therefore, Gamma GLM is selected as the preferred model for this claim severity modeling project.
