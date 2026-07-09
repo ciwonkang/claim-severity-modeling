@@ -63,3 +63,9 @@ The comparison focuses on:
 - insuranceData
 - car
 - moments
+
+## Full Project Report
+
+The complete interactive HTML report is available below.
+
+https://ciwonkang.github.io/claim-severity-modeling/Project1.html
