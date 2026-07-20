@@ -69,3 +69,10 @@ The comparison focuses on:
 The complete interactive HTML report is available below.
 
 https://ciwonkang.github.io/claim-severity-modeling/Project1.html
+
+
+
+## References
+
+Dataset: AutoClaims Dataset (insuranceData R package)
+https://cran.r-project.org/package=insuranceData
